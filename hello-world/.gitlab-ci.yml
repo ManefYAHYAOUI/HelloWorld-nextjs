@@ -1,0 +1,24 @@
+stages:
+  - build
+  - scan
+  - deploy
+ 
+build:
+  stage: build
+  script:
+    - docker build -t $IMAGE_NAME .
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+    - docker push $IMAGE_NAME
+ 
+scan:
+  stage: scan
+  image: aquasec/trivy
+  script:
+    - trivy image $IMAGE_NAME
+ 
+deploy:
+  stage: deploy
+  script:
+    - echo "Déploiement en cours..."
+    - docker-compose down || true
+    - docker-compose up -d
