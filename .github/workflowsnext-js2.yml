@@ -1,0 +1,70 @@
+name: Deploy Next.js App
+
+# Déclenche le workflow sur un push ou pull request sur la branche main
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Variables d'environnement globales
+env:
+  DOCKER_IMAGE: manef674/projet-federateur
+  DOCKER_TAG: v2
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout du code source
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configuration de Node.js (version adaptée à Next.js)
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # Installation des dépendances
+      - name: Install dependencies
+        run: npm ci
+
+      # Construction de l'application Next.js
+      - name: Build Next.js app
+        run: npm run build
+
+      # Connexion à Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Construction et push de l'image Docker
+      - name: Build and push Docker image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} .
+          docker push ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+      # Configuration du contexte Kubernetes (par ex. avec kubeconfig)
+      - name: Setup Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      # Déploiement vers Kubernetes
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f deployment.yaml
+          kubectl rollout status deployment/nextjs-app
+
+      # Vérification du déploiement
+      - name: Verify deployment
+        run: |
+          kubectl get pods -l app=nextjs-app
+          kubectl get svc nextjs-service
