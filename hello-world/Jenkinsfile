@@ -1,0 +1,81 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = 'manef674/projet-federateur'
+        DOCKER_TAG = 'v2'
+        DOCKER_CREDENTIALS_ID = 'docker-hub-credentials' // ID des credentials dans Jenkins
+        KUBE_CREDENTIALS_ID = 'kubeconfig-credentials'   // ID des credentials kubeconfig dans Jenkins
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Récupération du code source depuis le dépôt Git
+                git branch: 'main', url: 'https://github.com/votre-utilisateur/votre-repo.git'
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                // Installation des dépendances Node.js
+                sh 'npm ci'
+            }
+        }
+
+        stage('Build Next.js App') {
+            steps {
+                // Construction de l'application Next.js
+                sh 'npm run build'
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                // Connexion à Docker Hub et construction/push de l'image
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    sh '''
+                        echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+                        docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                // Déploiement vers Kubernetes avec kubeconfig
+                withCredentials([file(credentialsId: "${KUBE_CREDENTIALS_ID}", variable: 'KUBECONFIG')]) {
+                    sh '''
+                        export KUBECONFIG=$KUBECONFIG
+                        kubectl apply -f deployment.yaml
+                        kubectl rollout status deployment/nextjs-app
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                // Vérification du déploiement
+                withCredentials([file(credentialsId: "${KUBE_CREDENTIALS_ID}", variable: 'KUBECONFIG')]) {
+                    sh '''
+                        export KUBECONFIG=$KUBECONFIG
+                        kubectl get pods -l app=nextjs-app
+                        kubectl get svc nextjs-service
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Déploiement réussi !'
+        }
+        failure {
+            echo 'Le déploiement a échoué.'
+        }
+    }
+}
