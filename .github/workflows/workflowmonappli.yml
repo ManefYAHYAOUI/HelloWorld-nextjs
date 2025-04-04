@@ -1,0 +1,88 @@
+name: CI/CD Next.js App
+
+# Déclenche le workflow sur un push ou pull request sur la branche main
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Variables d'environnement globales
+env:
+  DOCKER_IMAGE: manef674/projet-federateur
+  DOCKER_TAG: v2
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout du code source
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configuration de Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # Installation des dépendances
+      - name: Install dependencies
+        run: npm ci
+
+      # Construction de l'application Next.js
+      - name: Build Next.js app
+        run: npm run build
+
+      # Test avec Docker Compose (facultatif, pour valider localement)
+      - name: Test with Docker Compose
+        run: |
+          docker-compose -f docker-compose.yml up -d
+          sleep 10 # Attendre que le conteneur démarre
+          curl http://localhost:3001 || exit 1
+          docker-compose -f docker-compose.yml down
+
+      # Connexion à Docker Hub
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # Construction et push de l'image Docker
+      - name: Build and push Docker image
+        run: |
+          docker build -t ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }} .
+          docker push ${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' # Déploiement uniquement sur push, pas sur PR
+
+    steps:
+      # Checkout du code source
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Configuration du contexte Kubernetes
+      - name: Setup Kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      # Déploiement vers Kubernetes
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f deployment.yaml
+          kubectl rollout status deployment/nextjs-app
+
+      # Vérification du déploiement
+      - name: Verify deployment
+        run: |
+          kubectl get pods -l app=nextjs-app
+          kubectl get svc nextjs-service
